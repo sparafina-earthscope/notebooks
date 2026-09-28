@@ -1,0 +1,36 @@
+name: gems
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  # Core (all notebooks)
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - xarray
+  - zarr
+  - fsspec
+  - s3fs             # only needed when GEMS_STORE is an S3 URL
+  - requests
+  # Geospatial (all notebooks)
+  - rasterio
+  - rioxarray
+  - affine
+  - geopandas
+  - pyogrio
+  - shapely
+  - pyproj
+  # Notebook 02: Dask
+  - dask
+  - distributed
+  - dask-gateway
+  - bokeh            # Dask dashboard
+  # Notebook 03: modeling
+  - lightgbm
+  - scikit-image
+  - psutil
+  # Notebook 03, section 6 (optional U-Net, needs a GPU server). Uncomment to install.
+  # - pytorch
+  # - segmentation-models-pytorch
+  - ipykernel
