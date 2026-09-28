@@ -1,0 +1,15 @@
+name: cascadia-gf
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - numpy
+  - scipy
+  - matplotlib
+  - pandas
+  - xarray
+  - netcdf4
+  - requests
+  - obspy>=1.4.1
+  - cartopy
+  - ipykernel

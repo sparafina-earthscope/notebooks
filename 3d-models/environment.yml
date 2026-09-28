@@ -1,0 +1,10 @@
+name: msh-3d-model
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - numpy
+  - tifffile
+  - pillow
+  - pyproj
+  - ipykernel

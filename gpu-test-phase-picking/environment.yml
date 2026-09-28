@@ -1,0 +1,10 @@
+name: imush-picking
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - pytorch
+  - seisbench
+  - obspy>=1.4.1
+  - matplotlib
+  - ipykernel

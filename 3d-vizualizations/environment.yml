@@ -1,0 +1,12 @@
+name: msh-3d-viz
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - numpy
+  - xarray
+  - rioxarray
+  - py3dep
+  - plotly
+  - obspy>=1.4.1
+  - ipykernel
