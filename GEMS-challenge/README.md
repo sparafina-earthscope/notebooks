@@ -70,7 +70,7 @@ The packages are gone the next time you start a server, so you need to run the c
 > [!IMPORTANT]
 > **Notebook 02 with Dask Gateway: use the default kernel, not `gems`.** Gateway workers start from a container image, and they run that image's default environment, `/srv/conda/envs/notebook`. They can't see a conda environment you create on the server. The cluster cell calls `client.get_versions(check=True)`, which stops if the kernel's Python and core packages differ from the workers'. A `gems` kernel from Option A gets its own Python, for example 3.14, and fails that check. Use Option C for notebook 02.
 >
-> The `gems` kernel from Option A works for notebooks 01 and 03. It also works for notebook 02 with `USE_LOCAL_CLUSTER = True`, because the workers then run on the notebook server in the same environment.
+> The `gems` kernel from Option A works for notebooks 01 and 03.
 
 **Option C: run notebook 02 in your GeoLab image, without rebuilding it.** Run the kernel and the workers in the same image, in its default environment, and install the few missing packages at runtime:
 
@@ -82,12 +82,9 @@ The packages are gone the next time you start a server, so you need to run the c
    ```
 
    `--no-deps` stops pip from upgrading `numpy`, `pandas`, or other core packages, which would break the version check with the workers. rioxarray's own dependencies (`rasterio`, `xarray`, `pyproj`, and `packaging`) are already in the image. The install is gone when the server stops.
-3. **Set the worker image.** `GATEWAY_IMAGE = "auto"` in the Configuration cell (the default) passes the server's own image to the workers. JupyterHub puts the image name in the `JUPYTER_IMAGE_SPEC` environment variable. If that variable isn't set, set `GATEWAY_IMAGE` to the full image name and tag. The cluster cell prints the image it requests.
-4. **Workers.** The workers need only `rasterio`, `affine`, `scipy`, and `numpy`, and they don't need rioxarray. The cluster cell checks that the workers can import these, and stops with a message if they can't. If one is missing, list it in `WORKER_PIP_PACKAGES`, for example `["rasterio"]`. Every worker then pip-installs it at startup, including workers that adaptive scaling adds later.
+3. **Start the cluster.** The workers need only `rasterio`, `affine`, `scipy`, and `numpy`, not rioxarray, so the default GeoLab image is enough for them. The cluster cell's version check (`get_versions`) confirms that the workers run the same Python and Dask versions as your kernel. If it reports a mismatch while you're in the default kernel, the workers are starting from a different image. Add `"image": os.environ["JUPYTER_IMAGE_SPEC"]` to `GATEWAY_OPTIONS` to start them in your server's image.
 
 For notebook 03 in the same kernel, run `%pip install lightgbm`. For the optional U-Net, also install `segmentation-models-pytorch`. Notebook 03 doesn't use Dask, so a normal install is fine there.
-
-If the Gateway only allows images from a fixed list, the cluster cell prints that list, and it stops with a `ValueError` when your image isn't on it. Use a fixed image tag rather than `latest`. Otherwise, the workers can pull a newer build than the one your server runs.
 
 To avoid the runtime installs, add the packages to the image's own `environment.yml` and rebuild it. The `pangeo/base-image` build installs that file into the `notebook` environment.
 
@@ -118,11 +115,9 @@ The notebooks stop with an error when an input is missing or malformed. They don
 #### Notebook 02: lidar derivatives
 
 1. **Test one tile.** The notebook runs one tile on the notebook server before it starts the cluster. This checks access to the 3DEP bucket and the memory use for your `decimate` setting.
-2. **Size the workers.** Run notebook 02 in the default kernel (Option C in step 2). The cluster cell prints the Gateway options and their allowed values. Set `instance_type` and `worker_resource_allocation` in `GATEWAY_OPTIONS` so that each worker has at least 4 GB with `decimate = 2`, or about 16 GB with `decimate = 1`.
+2. **Size the workers.** Run notebook 02 in the default kernel (Option C in step 2). Run `Gateway().cluster_options()` in a cell to see the options and their allowed values. Then set them in `GATEWAY_OPTIONS`, for example `{"worker_resource_allocation": "..."}`, so that each worker has at least 4 GB with `decimate = 2`, or about 16 GB with `decimate = 1`.
 3. **Start small.** `MAX_TILES = 8` processes a test subset. Set it to `None` for the full region, which reads about 0.4 GB per tile.
 4. **Shut down the cluster.** When the output is written, run `cluster.shutdown()`.
-
-If Dask Gateway isn't available, set `USE_LOCAL_CLUSTER = True` to run on the notebook server. This is only practical for a few tiles.
 
 #### Notebook 03: modeling and candidates
 
@@ -146,9 +141,7 @@ Each notebook has a **Configuration** cell in section 0. The settings you're mos
 | 01 | `EXTRA_RASTERS`, `EXTRA_FAULT_VECTORS` | empty | Your own rasters (for example gravity or INGENIOUS layers) and fault traces. |
 | 02 | `PARAMS["decimate"]` | `2` | `1` = full 1 m resolution (about 16 GB per worker); `2` = 2 m (about 4 GB). |
 | 02 | `MAX_TILES` | `8` | Test subset. `None` = all tiles. |
-| 02 | `GATEWAY_OPTIONS`, `MIN_WORKERS`, `MAX_WORKERS` | defaults, 2–40 | Worker size and number. |
-| 02 | `GATEWAY_IMAGE` | `"auto"` | Worker image. `"auto"` uses the notebook server's image; `None` uses the Gateway default. |
-| 02 | `WORKER_PIP_PACKAGES` | `[]` | Packages each worker pip-installs at startup, for packages the worker image lacks. |
+| 02 | `GATEWAY_OPTIONS`, `MIN_WORKERS`, `MAX_WORKERS` | `{}` (Gateway defaults), 2–40 | Options passed to `gateway.new_cluster()`, such as worker size, and the range of the worker count. |
 | 03 | `N_FOLDS`, `BLOCK_PX`, `BUFFER_PX` | 5, 20 km, 1 km | Spatial cross-validation. |
 | 03 | `NEG_MIN_DIST_M`, `UNLABELED_WEIGHT` | 1000 m, 0.5 | Positive-unlabeled sampling. These are heuristics, so test their effect. |
 | 03 | `CAND_THRESHOLD`, `CAND_MIN_DIST_M`, `CAND_MIN_LENGTH_M` | 0.5, 500 m, 2 km | Candidate extraction. |
@@ -161,10 +154,9 @@ Each notebook has a **Configuration** cell in section 0. The settings you're mos
 - **`No valid EarthScope login` (notebook 01):** run `es login` in a terminal on the server, then run the cell again. Or set `GNSS_SOURCE = "midas"`.
 - **`HTTPError: 404` for the EarthScope velocity file (notebook 01):** the file was renamed, for example for a new reference frame. Find the current name on the EarthScope GNSS data products page and update `EARTHSCOPE_VEL_URL`.
 - **`HTTPError: 404` for the MIDAS file (notebook 01):** NGL renamed the file. Check the file list at <https://geodesy.unr.edu/gps_timeseries/IGS20/midas/> and update `MIDAS_URL`.
-- **`Gateway option ... is not offered` (notebook 02):** use the option names that the cluster cell prints.
+- **Error for a Gateway option (notebook 02):** run `Gateway().cluster_options()` to see the option names and allowed values, and fix `GATEWAY_OPTIONS`.
 - **`scheduler-connection-lost` or `Sending large graph` (notebook 02):** the Dask scheduler ran out of memory or dropped the connection. The per-tile results are held on the notebook server, so re-run only the failed cell.
 - **`VersionMismatchWarning` with different `python` versions for Client and Scheduler (notebook 02):** the kernel runs in a different conda environment from the Gateway scheduler. The paths in the warning show which environment each one uses, for example `/srv/conda/envs/gems/...` for the kernel. Switch notebook 02 to the default kernel, **Python 3 (ipykernel)**, and follow Option C.
-- **`Workers cannot import [...]` (notebook 02):** add the listed packages to `WORKER_PIP_PACKAGES`, run `cluster.shutdown()`, and run the cluster cell again.
-- **`get_versions` mismatch (notebook 02):** the notebook kernel and the Gateway workers use different package versions. Start the notebook server from your custom image, run notebook 02 in its default kernel, and check the `Worker image:` line that the cluster cell prints. It must name the same image and tag as your server.
+- **`get_versions` mismatch (notebook 02), in the default kernel:** the Gateway workers start from a different image from your server. Add `"image": os.environ["JUPYTER_IMAGE_SPEC"]` to `GATEWAY_OPTIONS`, run `cluster.shutdown()`, and run the cluster cell again.
 - **`dem1m_features.zarr not found` (notebook 03):** run notebook 02 first, or set `REQUIRE_DEM = False`.
 - **Memory error in notebook 03:** use a larger server, reduce `FEATURE_SCALES_PX`, or add layers to `EXCLUDE_FEATURES`.
