@@ -1,0 +1,18 @@
+# GEMS-challenge: output store (STORE_ROOT defaults to $PWD/gems), several GB of zarr and GeoTIFF
+GEMS-challenge/gems/
+
+# greens-functions: Syngine response cache and Slab2 downloads
+greens-functions/cache_cascadia_gf/
+greens-functions/data_cascadia/
+
+# 3d-models: downloaded DEMs, STL models, and hillshade previews
+3d-models/dem_*.tif
+3d-models/*.stl
+3d-models/preview_hillshade_*.png
+
+# Jupyter and Python
+.ipynb_checkpoints/
+__pycache__/
+
+# macOS
+.DS_Store

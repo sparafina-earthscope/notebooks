@@ -10,6 +10,7 @@ dependencies:
   - matplotlib
   - xarray
   - zarr
+  - netcdf4          # notebook 01: MT conductivity model (NetCDF-4)
   - fsspec
   - s3fs             # only needed when GEMS_STORE is an S3 URL
   - requests
@@ -34,3 +35,8 @@ dependencies:
   # - pytorch
   # - segmentation-models-pytorch
   - ipykernel
+  # Notebook 01: EarthScope GNSS velocities (GNSS_SOURCE = "earthscope"). pip-only.
+  - pip
+  - pip:
+      - earthscope-sdk
+      - earthscope-cli   # provides `es login`

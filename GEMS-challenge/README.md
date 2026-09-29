@@ -11,7 +11,7 @@ Run the notebooks in order. Each one reads the outputs of the notebooks before i
 
 | Notebook | What it does | Main outputs |
 |---|---|---|
-| `01_data_assembly.ipynb` | Builds the grid and fault labels (USGS Quaternary faults) and the feature stack. The features come from GeoDAWN magnetic and radiometric grids, ComCat earthquake density, and GNSS strain rate. | `grid.json`, `features.zarr`, `labels.zarr`, `qfaults_aoi.gpkg` |
+| `01_data_assembly.ipynb` | Builds the grid and fault labels (USGS Quaternary faults) and the feature stack. The features come from GeoDAWN magnetic and radiometric grids, ComCat earthquake density, and GNSS strain rate. It also adds a mid-crustal conductivity layer from an EarthScope magnetotelluric model, which notebook 03 uses only for ranking. | `grid.json`, `features.zarr`, `labels.zarr`, `qfaults_aoi.gpkg` |
 | `02_dem_derivatives_dask.ipynb` | Computes terrain derivatives from USGS 3DEP 1 m lidar on a Dask Gateway cluster, including slope anomaly, Laplacian, TPI, and lineament orientation. It aggregates them to the 100 m grid. | `dem1m_features.zarr` |
 | `03_modeling_and_candidates.ipynb` | Trains LightGBM with spatially blocked cross-validation, maps fault probability, and extracts and ranks unmapped fault candidates. An optional U-Net can be run for comparison. | `predictions/*.tif`, `predictions/fault_candidates.gpkg` |
 
@@ -38,7 +38,7 @@ The notebooks need these packages:
 
 | Notebook | Packages |
 |---|---|
-| 01 | `rioxarray`, `rasterio`, `geopandas`, `pyogrio`, `shapely`, `pyproj`, `scipy`, `zarr`, `fsspec`, `requests` |
+| 01 | `rioxarray`, `rasterio`, `geopandas`, `pyogrio`, `shapely`, `pyproj`, `scipy`, `zarr`, `fsspec`, `requests`, `earthscope-sdk` (for the EarthScope GNSS velocities), and `netCDF4` (for the MT model) |
 | 02 | Same as 01, plus `dask`, `distributed`, and `dask-gateway` |
 | 03 | Same as 01, plus `lightgbm`, `scikit-image`, and `psutil` |
 | 03, section 6 (optional U-Net) | `pytorch` and `segmentation-models-pytorch`, and a GPU server |
@@ -91,7 +91,7 @@ If the Gateway only allows images from a fixed list, the cluster cell prints tha
 
 To avoid the runtime installs, add the packages to the image's own `environment.yml` and rebuild it. The `pangeo/base-image` build installs that file into the `notebook` environment.
 
-**Storage location.** By default, the notebooks write to `~/gems` and cache downloads in `/tmp/gems_cache`. To use other locations, set these environment variables before you start the kernel:
+**Storage location.** By default, the notebooks write to a `gems` folder next to the notebooks (`$PWD/gems`, that is `~/notebooks/GEMS-challenge/gems`) and cache downloads in `/tmp/gems_cache`. All three notebooks are in the same folder, so they share the same store. To use other locations, set these environment variables before you start the kernel:
 
 ```bash
 export GEMS_STORE=s3://my-bucket/gems   # an S3 URL also needs s3fs
@@ -111,7 +111,8 @@ The notebooks stop with an error when an input is missing or malformed. They don
 
 #### Notebook 01: data assembly
 
-- **Downloads:** the two GeoDAWN GeoTIFF bundles (about 290 MB), the Quaternary fault database, the ComCat catalog, and the NGL MIDAS velocities.
+- **Downloads:** the two GeoDAWN GeoTIFF bundles (about 290 MB), the Quaternary fault database, the ComCat catalog, and the GNSS station velocities.
+- **EarthScope login (GNSS):** by default, notebook 01 reads the GNSS velocities from the EarthScope data archive (the GAGE velocity field), which needs an EarthScope account. Log in once from a terminal on the server with `es login`, and follow the link it prints. The login is saved in `~/.earthscope`, so it lasts across sessions. If you can't log in, set `GNSS_SOURCE = "midas"` to use the NGL MIDAS velocities, which need no login.
 - **GeoDAWN file table:** review the table the notebook prints before the grids load. `GEODAWN_INCLUDE` selects only the `*_tiffs.zip` bundles. The larger `*_gdb.zip` and `*_csv.zip` files are on ScienceBase's newer file manager, which sends scripts an HTML page instead of the file.
 
 #### Notebook 02: lidar derivatives
@@ -139,7 +140,9 @@ Each notebook has a **Configuration** cell in section 0. The settings you're mos
 | 01 | `AOI_LONLAT_OVERRIDE` | `None` | Smaller area as (lon_min, lat_min, lon_max, lat_max). `None` uses the GeoDAWN bounding box. |
 | 01 | `GEODAWN_INCLUDE`, `GEODAWN_EXCLUDE` | TIFF bundles only | Regular expressions on file names. |
 | 01 | `EQ_START`, `EQ_END`, `EQ_MIN_MAG` | 1980–2026, M1.0 | Earthquake catalog selection. |
-| 01 | `MIDAS_URL` | `midas.IGS.txt` | GNSS velocity file. `midas.NA.txt` gives North-America-fixed velocities; the strain rate is the same. |
+| 01 | `GNSS_SOURCE` | `"earthscope"` | GNSS velocities: `"earthscope"` (GAGE velocity field, needs `es login`) or `"midas"` (NGL MIDAS, no login). The strain rate doesn't depend on the reference frame. |
+| 01 | `EARTHSCOPE_VEL_URL`, `MIDAS_URL` | `cwu.snaps_nam14.vel`, `midas.IGS.txt` | The velocity file for each source. |
+| 01 | `MT_MODEL_FILE`, `MT_DEPTHS_KM` | `CONUS-MT-2026.r0.2-n4c.nc`, `(10.0,)` | Magnetotelluric conductivity model from the [EarthScope EMC catalog](https://data.earthscope.org/app/products/portal/emc_model_catalog.html), and the depths at which to take slices. `None` turns MT off. `WUS.MT.Bedrosian2021.resistivity.r0.0-n4c.nc` is a western-US alternative. |
 | 01 | `EXTRA_RASTERS`, `EXTRA_FAULT_VECTORS` | empty | Your own rasters (for example gravity or INGENIOUS layers) and fault traces. |
 | 02 | `PARAMS["decimate"]` | `2` | `1` = full 1 m resolution (about 16 GB per worker); `2` = 2 m (about 4 GB). |
 | 02 | `MAX_TILES` | `8` | Test subset. `None` = all tiles. |
@@ -149,11 +152,14 @@ Each notebook has a **Configuration** cell in section 0. The settings you're mos
 | 03 | `N_FOLDS`, `BLOCK_PX`, `BUFFER_PX` | 5, 20 km, 1 km | Spatial cross-validation. |
 | 03 | `NEG_MIN_DIST_M`, `UNLABELED_WEIGHT` | 1000 m, 0.5 | Positive-unlabeled sampling. These are heuristics, so test their effect. |
 | 03 | `CAND_THRESHOLD`, `CAND_MIN_DIST_M`, `CAND_MIN_LENGTH_M` | 0.5, 500 m, 2 km | Candidate extraction. |
-| 03 | `FAVOR_WEIGHTS` | see notebook | Weights of the geothermal ranking score. |
+| 03 | `FAVOR_WEIGHTS` | see notebook | Weights of the geothermal ranking score, including MT conductivity at 10 km. |
+| 03 | `RANKING_ONLY_PREFIXES` | `("mt_",)` | Layers used only for ranking, never as model features. |
 
 ## Troubleshooting
 
 - **`... is not a zip file ... First bytes: b'<!doctype html>...'` (notebook 01):** ScienceBase served a web page instead of the file. This happens for files on its newer file manager. Exclude that file, or download it by hand in a browser and put it in the cache folder. The notebook has already deleted the bad cached copy.
+- **`No valid EarthScope login` (notebook 01):** run `es login` in a terminal on the server, then run the cell again. Or set `GNSS_SOURCE = "midas"`.
+- **`HTTPError: 404` for the EarthScope velocity file (notebook 01):** the file was renamed, for example for a new reference frame. Find the current name on the EarthScope GNSS data products page and update `EARTHSCOPE_VEL_URL`.
 - **`HTTPError: 404` for the MIDAS file (notebook 01):** NGL renamed the file. Check the file list at <https://geodesy.unr.edu/gps_timeseries/IGS20/midas/> and update `MIDAS_URL`.
 - **`Gateway option ... is not offered` (notebook 02):** use the option names that the cluster cell prints.
 - **`scheduler-connection-lost` or `Sending large graph` (notebook 02):** the Dask scheduler ran out of memory or dropped the connection. The per-tile results are held on the notebook server, so re-run only the failed cell.
